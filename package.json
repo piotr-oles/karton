@@ -1,6 +1,6 @@
 {
   "name": "karton",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Create sandbox for package e2e tests",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
