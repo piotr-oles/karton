@@ -1,0 +1,48 @@
+{
+  "name": "karton",
+  "version": "0.0.0",
+  "description": "Create sandbox for package e2e tests",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "repository": "git@github.com:piotr-oles/karton.git",
+  "author": "Piotr Oleś <piotrek.oles@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier src --write",
+    "release": "auto shipit"
+  },
+  "files": [
+    "lib/*"
+  ],
+  "dependencies": {
+    "chalk": "^4.1.0",
+    "cross-spawn": "^7.0.3",
+    "fs-extra": "^9.1.0",
+    "strip-ansi": "^6.0.0",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.2",
+    "@types/fs-extra": "^9.0.7",
+    "auto": "^10.16.5",
+    "husky": "^4.0.0",
+    "prettier": "^2.2.1",
+    "typescript": "^4.1.5"
+  },
+  "auto": {
+    "plugins": [
+      "npm",
+      "released"
+    ],
+    "onlyPublishWithReleaseLabel": true,
+    "shipit": {
+      "noChangelog": true
+    }
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "yarn format && yarn build"
+    }
+  }
+}
