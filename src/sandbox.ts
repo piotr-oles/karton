@@ -1,6 +1,7 @@
 import { resolve, dirname } from "path";
 import fs from "fs-extra";
 import os from "os";
+import crypto from "crypto";
 import { exec, ChildProcess } from "child_process";
 import spawn from "cross-spawn";
 import stripAnsi from "strip-ansi";
@@ -9,17 +10,13 @@ import { defaultLogger, Logger } from "./logger";
 import { Package } from "./package";
 import { retry, RetryOptions, wait } from "./async";
 
-type PackageManager = "yarn" | "npm";
-
-interface InstallOverwrites {
-  dependencies?: Package[];
-  devDependencies?: Package[];
-  optionalDependencies?: Package[];
-}
-
 interface CommandOptions {
   cwd?: string;
   env?: Record<string, string>;
+}
+
+interface InstallOptions {
+  lockDirectory?: string;
 }
 
 interface Sandbox {
@@ -28,9 +25,9 @@ interface Sandbox {
   cleanup(options?: RetryOptions): Promise<void>;
   load(directory: string, options?: RetryOptions): Promise<void>;
   install(
-    manager: PackageManager,
-    overwrites: InstallOverwrites,
-    options?: RetryOptions
+    manager: "yarn" | "npm",
+    overwrites: Package[],
+    options?: InstallOptions & RetryOptions
   ): Promise<void>;
   write(path: string, content: string, options?: RetryOptions): Promise<void>;
   read(path: string, options?: RetryOptions): Promise<string>;
@@ -103,9 +100,9 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       return retry(() => fs.copy(directory, context), logger, options);
     },
     install: async (
-      manager: PackageManager,
-      overwrites: InstallOverwrites = {},
-      options?: RetryOptions
+      manager: "yarn" | "npm",
+      overwrites: Package[],
+      options?: InstallOptions & RetryOptions
     ) => {
       logger.log("Installing dependencies...");
 
@@ -115,23 +112,15 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         );
       }
 
-      const packageJSON = JSON.parse(
+      const originalPackageJSON = JSON.parse(
         await sandbox.read("package.json", options)
       );
-      for (const target of [
-        "dependencies",
-        "devDependencies",
-        "optionalDependencies",
-      ] as const) {
-        const packages = overwrites[target];
-        if (packages) {
-          if (!packageJSON[target]) {
-            packageJSON[target] = {};
-          }
-          for (const pkg of packages) {
-            packageJSON[target][pkg.name] = pkg.version;
-          }
-        }
+      const packageJSON = {
+        ...originalPackageJSON,
+        dependencies: originalPackageJSON.dependencies || {},
+      };
+      for (const { name, version } of overwrites) {
+        packageJSON.dependencies[name] = version;
       }
       await sandbox.write(
         "package.json",
@@ -139,12 +128,49 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         options
       );
 
+      let lockFile: string | undefined;
+      if (options?.lockDirectory) {
+        lockFile = resolve(
+          options.lockDirectory,
+          `${crypto
+            .createHash("md5")
+            .update(
+              JSON.stringify([
+                manager,
+                overwrites.filter((pkg) => pkg.immutable),
+                originalPackageJSON.dependencies,
+                originalPackageJSON.devDependencies,
+              ])
+            )
+            .digest("hex")}.lock`
+        );
+      }
+
+      const tryToLoadLockFile = async (managerFile: string) => {
+        if (lockFile && (await fs.pathExists(lockFile))) {
+          await sandbox.write(
+            managerFile,
+            await fs.readFile(lockFile, "utf-8")
+          );
+        }
+      };
+
+      const tryToStoreLockFile = async (managerFile: string) => {
+        if (lockFile && (await sandbox.exists(managerFile))) {
+          await fs.writeFile(lockFile, await sandbox.read(managerFile));
+        }
+      };
+
       switch (manager) {
         case "yarn":
+          await tryToLoadLockFile("yarn.lock");
           await sandbox.exec(`yarn install --prefer-offline`, options);
+          await tryToStoreLockFile("yarn.lock");
           break;
         case "npm":
+          await tryToLoadLockFile("package-lock.json");
           await sandbox.exec(`npm install`, options);
+          await tryToStoreLockFile("package-lock.json");
           break;
       }
     },
@@ -313,4 +339,4 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
   return sandbox;
 }
 
-export { Sandbox, createSandbox, PackageManager, InstallOverwrites };
+export { Sandbox, createSandbox };
