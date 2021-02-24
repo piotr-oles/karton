@@ -16,4 +16,4 @@ const defaultLogger: Logger = {
   },
 };
 
-export { Logger, defaultLogger }
+export { Logger, defaultLogger };

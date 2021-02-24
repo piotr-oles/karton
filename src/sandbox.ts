@@ -217,7 +217,7 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         options
       );
     },
-    exec: (command: string, options: CommandOptions & RetryOptions) =>
+    exec: (command: string, options: CommandOptions & RetryOptions = {}) =>
       retry(
         () =>
           new Promise<string>((resolve, reject) => {
@@ -257,7 +257,7 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         logger,
         options
       ),
-    spawn: (command: string, options: CommandOptions) => {
+    spawn: (command: string, options: CommandOptions = {}) => {
       logger.log(`Spawning "${command}" command...`);
 
       const env = options.env || {};
