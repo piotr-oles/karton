@@ -157,7 +157,23 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
 
       const tryToStoreLockFile = async (managerFile: string) => {
         if (lockFile && (await sandbox.exists(managerFile))) {
-          await fs.writeFile(lockFile, await sandbox.read(managerFile));
+          const lockFileDir = dirname(lockFile);
+          await retry(
+            async () => {
+              if (!(await fs.pathExists(lockFileDir))) {
+                await fs.mkdirp(lockFileDir);
+              }
+            },
+            logger,
+            options
+          );
+
+          await retry(
+            async () =>
+              fs.writeFile(lockFile!, await sandbox.read(managerFile)),
+            logger,
+            options
+          );
         }
       };
 
