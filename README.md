@@ -1,13 +1,14 @@
 <div align="center">
 
 <h1>karton </h1>
-<p>Create sandbox for E2E tests 📦</p>
+<p>Test your package in a sandbox 📦</p>
+<p>⚠️ In development ⚠️</p>
 
 </div>
 
 ## Installation
 
-This loader requires minimum Node.js 10
+This package requires minimum Node.js 10
 
 ```sh
 # with npm
@@ -47,7 +48,6 @@ describe('my-package', () => {
   });
   afterAll(async () => {
     await sandbox.cleanup();
-    await myPackage.remove();
   })
 
   it.each([
@@ -55,9 +55,7 @@ describe('my-package', () => {
     externalPackage('webpack', '^5.0.0')
   ])('works with webpack %p', async (webpack) => {
     await sandbox.load(path.join(__dirname, 'fixtures/basic'));
-    await sandbox.install('yarn', {
-      dependencies: [myPackage, webpack]
-    });
+    await sandbox.install('yarn', [myPackage, webpack]);
     const result = await sandbox.exec('node src/test.js');
     
     expect(result).toEqual('my-package awesome output');
