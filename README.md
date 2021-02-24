@@ -23,33 +23,41 @@ This package helps you with writing E2E tests for your packages.
 Example:
 
 ```typescript
-import { createSandbox, Sandbox } from "karton";
+import { 
+  createSandbox,
+  Sandbox, 
+  packLocalPackage,
+  externalPackage, 
+  Package
+} from "karton";
 import path from 'path';
-import fs from 'fs-extra';
 
 describe('my-package', () => {
   let sandbox: Sandbox;
-  beforeEach(async () => {
+  let myPackage: Package;
+
+  beforeAll(async () => {
+    myPackage = await packLocalPackage(
+      path.resolve(__dirname, '../../')
+    );
     sandbox = await createSandbox();
   });
   afterEach(async () => {
-    await sandbox.destroy();
+    await sandbox.reset();
   });
+  afterAll(async () => {
+    await sandbox.cleanup();
+    await myPackage.remove();
+  })
 
   it.each([
-    '^4.0.0',
-    '^5.0.0'
-  ])('works with webpack %p', async (webpackVersion) => {
-    const packageJSON = JSON.parse(
-      await fs.readFile('fixtures/package.json', 'utf-8')
-    );
-    packageJSON.dependencies['webpack'] = webpackVersion;
-    packageJSON.dependencies['my-package'] = path.resolve(__dirname, '../my-package-0.0.0.tgz');
-  
-    await sandbox.write('package.json', JSON.stringify(packageJSON));
-    await sandbox.write('src/test.js', await fs.readFile('fixtures/src/test.js'));
-        
-    await sandbox.exec('yarn install');
+    externalPackage('webpack', '^4.0.0'),
+    externalPackage('webpack', '^5.0.0')
+  ])('works with webpack %p', async (webpack) => {
+    await sandbox.load(path.join(__dirname, 'fixtures/basic'));
+    await sandbox.install('yarn', {
+      dependencies: [myPackage, webpack]
+    });
     const result = await sandbox.exec('node src/test.js');
     
     expect(result).toEqual('my-package awesome output');
