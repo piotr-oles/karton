@@ -117,7 +117,9 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       );
       const packageJSON = {
         ...originalPackageJSON,
-        dependencies: originalPackageJSON.dependencies || {},
+        dependencies: originalPackageJSON.dependencies
+          ? { ...originalPackageJSON.dependencies }
+          : {},
       };
       for (const { name, version } of overwrites) {
         packageJSON.dependencies[name] = version;
