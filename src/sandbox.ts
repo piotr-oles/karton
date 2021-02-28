@@ -7,17 +7,36 @@ import spawn from "cross-spawn";
 import stripAnsi from "strip-ansi";
 import treeKill from "tree-kill";
 import { defaultLogger, Logger } from "./logger";
-import { Package } from "./package";
 import { retry, RetryOptions, wait } from "./async";
 
-interface CommandOptions {
+interface SandboxOptions {
+  logger?: Logger;
+  lockDirectory?: string;
+  fixedDependencies?: Record<string, string>;
+}
+
+interface ExecOptions extends RetryOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  fail?: boolean;
+}
+
+interface SpawnOptions {
   cwd?: string;
   env?: Record<string, string>;
 }
 
-interface InstallOptions {
-  lockDirectory?: string;
-}
+type BufferEncoding =
+  | "ascii"
+  | "utf8"
+  | "utf-8"
+  | "utf16le"
+  | "ucs2"
+  | "ucs-2"
+  | "base64"
+  | "latin1"
+  | "binary"
+  | "hex";
 
 interface Sandbox {
   context: string;
@@ -26,11 +45,20 @@ interface Sandbox {
   load(directory: string, options?: RetryOptions): Promise<void>;
   install(
     manager: "yarn" | "npm",
-    overwrites: Package[],
-    options?: InstallOptions & RetryOptions
+    dependencies: Record<string, string>,
+    options?: RetryOptions
   ): Promise<void>;
-  write(path: string, content: string, options?: RetryOptions): Promise<void>;
-  read(path: string, options?: RetryOptions): Promise<string>;
+  write(
+    path: string,
+    content: string | Buffer,
+    options?: RetryOptions
+  ): Promise<void>;
+  read(
+    path: string,
+    encoding: BufferEncoding,
+    options?: RetryOptions
+  ): Promise<string>;
+  read(path: string, options?: RetryOptions): Promise<Buffer>;
   exists(path: string, options?: RetryOptions): Promise<boolean>;
   remove(path: string, options?: RetryOptions): Promise<void>;
   patch(
@@ -39,11 +67,9 @@ interface Sandbox {
     replacement: string,
     options?: RetryOptions
   ): Promise<void>;
-  exec(
-    command: string,
-    options?: CommandOptions & RetryOptions
-  ): Promise<string>;
-  spawn(command: string, options?: CommandOptions): ChildProcess;
+  list(path: string, options?: RetryOptions): Promise<fs.Dirent[]>;
+  exec(command: string, options?: ExecOptions): Promise<string>;
+  spawn(command: string, options?: SpawnOptions): ChildProcess;
   kill(childProcess: ChildProcess, options?: RetryOptions): Promise<void>;
 }
 
@@ -51,7 +77,13 @@ function normalizeEol(content: string): string {
   return content.split(/\r\n?|\n/).join("\n");
 }
 
-async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
+async function createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
+  const {
+    logger = defaultLogger,
+    fixedDependencies = {},
+    lockDirectory,
+  } = options;
+
   const context = fs.realpathSync.native(
     await fs.mkdtemp(resolve(os.tmpdir(), "karton-sandbox-"))
   );
@@ -101,8 +133,8 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
     },
     install: async (
       manager: "yarn" | "npm",
-      overwrites: Package[],
-      options?: InstallOptions & RetryOptions
+      dependencies: Record<string, string>,
+      options?: RetryOptions
     ) => {
       logger.log("Installing dependencies...");
 
@@ -113,17 +145,16 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       }
 
       const originalPackageJSON = JSON.parse(
-        await sandbox.read("package.json", options)
+        await sandbox.read("package.json", "utf8", options)
       );
       const packageJSON = {
         ...originalPackageJSON,
-        dependencies: originalPackageJSON.dependencies
-          ? { ...originalPackageJSON.dependencies }
-          : {},
+        dependencies: {
+          ...(originalPackageJSON.dependencies || {}),
+          ...fixedDependencies,
+          ...dependencies,
+        },
       };
-      for (const { name, version } of overwrites) {
-        packageJSON.dependencies[name] = version;
-      }
       await sandbox.write(
         "package.json",
         JSON.stringify(packageJSON, undefined, "  "),
@@ -131,15 +162,15 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       );
 
       let lockFile: string | undefined;
-      if (options?.lockDirectory) {
+      if (lockDirectory) {
         lockFile = resolve(
-          options.lockDirectory,
+          lockDirectory,
           `${crypto
             .createHash("md5")
             .update(
               JSON.stringify([
                 manager,
-                overwrites.filter((pkg) => pkg.immutable),
+                dependencies,
                 originalPackageJSON.dependencies,
                 originalPackageJSON.devDependencies,
               ])
@@ -192,7 +223,11 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
           break;
       }
     },
-    write: async (path: string, content: string, options?: RetryOptions) => {
+    write: async (
+      path: string,
+      content: string | Buffer,
+      options?: RetryOptions
+    ) => {
       logger.log(`Writing file ${path}...`);
       const realPath = resolve(context, path);
       const dirPath = dirname(realPath);
@@ -211,19 +246,38 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       await wait();
 
       return retry(
-        () => fs.writeFile(realPath, normalizeEol(content)),
+        () =>
+          fs.writeFile(
+            realPath,
+            typeof content === "string" ? normalizeEol(content) : content
+          ),
         logger,
         options
       );
     },
-    read: (path: string, options?: RetryOptions) => {
+    read: (
+      path: string,
+      encodingOrOptions?: BufferEncoding | RetryOptions,
+      options?: RetryOptions
+    ): Promise<string> | Promise<Buffer> => {
       logger.log(`Reading file ${path}...`);
 
-      return retry(
-        () => fs.readFile(resolve(context, path), "utf-8").then(normalizeEol),
-        logger,
-        options
-      );
+      if (typeof encodingOrOptions === "string") {
+        return retry<string>(
+          () =>
+            fs
+              .readFile(resolve(context, path), encodingOrOptions)
+              .then(normalizeEol),
+          logger,
+          options
+        );
+      } else {
+        return retry(
+          () => fs.readFile(resolve(context, path)),
+          logger,
+          options
+        );
+      }
     },
     exists: (path: string) => fs.pathExists(resolve(context, path)),
     remove: (path: string, options?: RetryOptions) => {
@@ -261,7 +315,13 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         options
       );
     },
-    exec: (command: string, options: CommandOptions & RetryOptions = {}) =>
+    list: (path: string, options?: RetryOptions) =>
+      retry(
+        () => fs.readdir(resolve(context, path), { withFileTypes: true }),
+        logger,
+        options
+      ),
+    exec: (command: string, options: ExecOptions = {}) =>
       retry(
         () =>
           new Promise<string>((resolve, reject) => {
@@ -280,10 +340,11 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
                 },
               },
               (error, stdout, stderr) => {
-                if (error) {
-                  reject(stdout + stderr);
+                const results = stripAnsi(stdout + stderr);
+                if ((error && options.fail) || !error) {
+                  resolve(results);
                 } else {
-                  resolve(stdout + stderr);
+                  reject(results);
                 }
                 childProcesses.delete(childProcess);
               }
@@ -301,7 +362,7 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
         logger,
         options
       ),
-    spawn: (command: string, options: CommandOptions = {}) => {
+    spawn: (command: string, options: SpawnOptions = {}) => {
       logger.log(`Spawning "${command}" command...`);
 
       const env = options.env || {};
@@ -352,7 +413,7 @@ async function createSandbox(logger: Logger = defaultLogger): Promise<Sandbox> {
       }
       childProcesses.delete(childProcess);
     },
-  };
+  } as Sandbox;
 
   return sandbox;
 }

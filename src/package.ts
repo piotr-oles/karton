@@ -4,21 +4,7 @@ import path from "path";
 import fs from "fs-extra";
 import os from "os";
 
-interface Package {
-  name: string;
-  version: string;
-  immutable?: boolean;
-}
-
-function externalPackage(name: string, version: string): Package {
-  const pkg = { name, version, immutable: true };
-  Object.assign(pkg, {
-    toString: () => `${pkg.name}@${pkg.version}`,
-  });
-  return pkg;
-}
-
-async function packLocalPackage(directory: string): Promise<Package> {
+async function packLocalPackage(directory: string): Promise<string> {
   const packageJSONPath = path.resolve(directory, "package.json");
   if (!(await fs.pathExists(packageJSONPath))) {
     throw new Error(
@@ -30,7 +16,7 @@ async function packLocalPackage(directory: string): Promise<Package> {
   );
   const npmPacked = path.resolve(directory, `${name}-${version}.tgz`);
 
-  return new Promise<Package>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const childProcess = exec(
       "npm pack",
       {
@@ -52,15 +38,7 @@ async function packLocalPackage(directory: string): Promise<Package> {
 
             await fs.move(npmPacked, packagePath);
 
-            const pkg = {
-              name,
-              version: `file:${packagePath}`,
-              immutable: false,
-            };
-            Object.assign(pkg, {
-              toString: () => `${name}@${version}`,
-            });
-            resolve(pkg);
+            resolve(packagePath);
           } else {
             reject(
               new Error(`Cannot find 'npm pack' output file: ${npmPacked}`)
@@ -79,4 +57,4 @@ async function packLocalPackage(directory: string): Promise<Package> {
   });
 }
 
-export { externalPackage, packLocalPackage, Package };
+export { packLocalPackage };

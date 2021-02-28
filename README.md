@@ -27,21 +27,22 @@ Example:
 import { 
   createSandbox,
   Sandbox, 
-  packLocalPackage,
-  externalPackage, 
-  Package
+  packLocalPackage
 } from "karton";
 import path from 'path';
 
 describe('my-package', () => {
   let sandbox: Sandbox;
-  let myPackage: Package;
 
   beforeAll(async () => {
-    myPackage = await packLocalPackage(
-      path.resolve(__dirname, '../../')
-    );
-    sandbox = await createSandbox();
+    sandbox = await createSandbox({
+      lockDirectory: path.resolve(__dirname, '__locks__'),
+      fixedDependencies: {
+        'my-package': `file:${await packLocalPackage(
+          path.resolve(__dirname, '../../')
+        )}`
+      }
+    });
   });
   afterEach(async () => {
     await sandbox.reset();
@@ -51,11 +52,11 @@ describe('my-package', () => {
   })
 
   it.each([
-    externalPackage('webpack', '^4.0.0'),
-    externalPackage('webpack', '^5.0.0')
-  ])('works with webpack %p', async (webpack) => {
+    [{ 'webpack': '^4.0.0' }],
+    [{ 'webpack': '^5.0.0' }]
+  ])('works with %p', async (dependencies) => {
     await sandbox.load(path.join(__dirname, 'fixtures/basic'));
-    await sandbox.install('yarn', [myPackage, webpack]);
+    await sandbox.install('yarn', dependencies);
     const result = await sandbox.exec('node src/test.js');
     
     expect(result).toEqual('my-package awesome output');
