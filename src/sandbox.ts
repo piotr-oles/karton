@@ -213,7 +213,7 @@ async function createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
       switch (manager) {
         case "yarn":
           await tryToLoadLockFile("yarn.lock");
-          await sandbox.exec(`yarn install --prefer-offline`, options);
+          await sandbox.exec(`yarn install`, options);
           await tryToStoreLockFile("yarn.lock");
           break;
         case "npm":
